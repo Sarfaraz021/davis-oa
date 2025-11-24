@@ -1,4 +1,7 @@
 """
-Memory bank and state management for the research pipeline.
+Memory Module - State management for TTD-DR agent.
 """
 
+from .state import AgentState, SearchResult
+
+__all__ = ["AgentState", "SearchResult"]
