@@ -30,14 +30,14 @@ Your plan should outline key areas to investigate for a property feasibility stu
 7. Risks & Challenges (constraints, timeline, costs)
 
 Output a JSON structure with sections and specific questions to research:
-{
+{{
   "sections": [
-    {
+    {{
       "title": "Section Name",
       "questions": ["Specific question 1", "Specific question 2"]
-    }
+    }}
   ]
-}"""
+}}"""
     
     def generate_plan(self, query: str, brief: str = "") -> Dict[str, Any]:
         """Generate research plan for a feasibility study."""

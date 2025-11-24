@@ -4,7 +4,15 @@ Implements the complete TTD-DR algorithm from the paper.
 """
 
 import os
+import sys
+from pathlib import Path
 from typing import Optional
+
+# Add src to path for imports
+src_path = Path(__file__).parent.parent.parent
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -284,246 +292,411 @@ Generate the final comprehensive feasibility study report.""")
         return "\n".join(lines)
 
 
-def create_graph():
-    """Create LangGraph-compatible graph with full TTD-DR stages."""
-    from typing import TypedDict, Annotated, Sequence, Dict, Any
-    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-    from langgraph.graph import StateGraph, END
-    from langgraph.prebuilt import ToolNode
+# ============================================================================
+# LangGraph Integration - Following LangGraph Quickstart Best Practices
+# ============================================================================
+
+from typing import TypedDict, Annotated, Sequence, Dict, Any, Literal
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langgraph.graph import StateGraph, START, END
+import operator
+
+
+class TTDDRGraphState(TypedDict):
+    """State for TTD-DR agent graph."""
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    address: str
+    brief: str
+    plan: Dict[str, Any]
+    search_history: list
+    draft_report: str
+    final_report: str
+    step_count: int
+
+
+# Initialize components (lazy loading for retriever)
+_model = None
+_planner = None
+_evaluator = None
+_self_evolution = None
+_retriever = None
+
+
+def _get_components():
+    """Lazy initialization of components."""
+    global _model, _planner, _evaluator, _self_evolution, _retriever
     
-    class TTDDRGraphState(TypedDict):
-        messages: Annotated[Sequence[BaseMessage], "Conversation messages"]
-        address: str
-        brief: str
-        plan: Dict[str, Any]
-        search_history: list
-        draft_report: str
-        final_report: str
-        step_count: int
+    if _model is None:
+        _model = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0,
+            openai_api_key=os.getenv("OPENAI_API_KEY")
+        )
+        _planner = ResearchPlanner(_model)
+        _evaluator = LLMEvaluator(_model)
+        _self_evolution = SelfEvolution(_model, _evaluator)
+        
+        try:
+            _retriever = ChromaRetriever()
+        except FileNotFoundError:
+            _retriever = None
     
-    model = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        openai_api_key=os.getenv("OPENAI_API_KEY")
-    )
+    return _model, _planner, _evaluator, _self_evolution, _retriever
+
+
+# ============================================================================
+# Node Definitions
+# ============================================================================
+
+def parse_input_node(state: TTDDRGraphState) -> dict:
+    """Parse user input and initialize state."""
+    messages = state.get("messages", [])
     
-    planner = ResearchPlanner(model)
-    evaluator = LLMEvaluator(model)
-    self_evolution = SelfEvolution(model, evaluator)
+    if not messages:
+        return {"address": "", "brief": "", "search_history": [], "step_count": 0}
     
-    try:
-        retriever = ChromaRetriever()
-    except FileNotFoundError:
-        retriever = None
+    last_msg = messages[-1]
     
-    def parse_input(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Parse user input."""
-        messages = state["messages"]
-        last_msg = messages[-1]
-        
-        if isinstance(last_msg, dict):
-            user_input = last_msg.get("content", "")
-        else:
-            user_input = last_msg.content
-        
-        state["address"] = user_input
-        state["brief"] = ""
-        state["search_history"] = []
-        state["step_count"] = 0
-        
-        return state
+    if isinstance(last_msg, dict):
+        user_input = last_msg.get("content", "")
+    else:
+        user_input = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
     
-    def stage1_plan(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Stage 1: Generate research plan."""
-        plan = planner.generate_plan(state["address"], state["brief"])
-        state["plan"] = plan
-        
-        msg = AIMessage(content=f"📝 Stage 1: Generated plan with {len(plan.get('sections', []))} sections")
-        state["messages"].append(msg)
-        
-        return state
+    return {
+        "address": user_input,
+        "brief": "",
+        "search_history": [],
+        "step_count": 0,
+        "messages": [AIMessage(content=f"🎯 Starting TTD-DR for: {user_input}")]
+    }
+
+
+def stage1_plan_node(state: TTDDRGraphState) -> dict:
+    """Stage 1: Generate structured research plan."""
+    _, planner, _, _, _ = _get_components()
     
-    def stage2_initial_draft(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Generate initial noisy draft (diffusion start)."""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "Generate initial draft feasibility study from internal knowledge."),
-            ("user", "Address: {address}\nGenerate initial draft.")
-        ])
-        
-        chain = prompt | model
-        response = chain.invoke({"address": state["address"]})
-        
-        state["draft_report"] = response.content
-        state["messages"].append(AIMessage(content="✍️ Diffusion: Initial draft generated"))
-        
-        return state
+    plan = planner.generate_plan(state["address"], state.get("brief", ""))
     
-    def stage2_search_question(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Generate search question."""
-        if state["step_count"] >= 8:
-            state["messages"].append(AIMessage(content="✓ Research complete (max steps)"))
-            return state
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "Generate next search question or 'DONE'."),
-            ("user", "Address: {address}\nStep: {step}\nPrevious: {history}")
-        ])
-        
-        history = "\n".join([f"Q: {q}" for q, _ in state["search_history"][-3:]])
-        
-        chain = prompt | model
-        response = chain.invoke({
-            "address": state["address"],
-            "step": state["step_count"] + 1,
-            "history": history or "None"
-        })
-        
-        question = response.content.strip()
-        if "DONE" in question.upper():
-            return state
-        
-        state["messages"].append(AIMessage(content=f"🔍 Q{state['step_count']+1}: {question[:60]}..."))
-        
-        web_results = web_search_tool.invoke({"query": question})
-        
-        kb_results = ""
-        if retriever:
-            try:
-                kb_docs = retriever.retrieve(question, top_k=2)
-                kb_results = "\n".join([d['content'][:200] for d in kb_docs])
-            except:
-                pass
-        
-        answer_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Synthesize answer from search results."),
-            ("user", "Q: {q}\nWeb: {web}\nKB: {kb}")
-        ])
-        
-        chain = answer_prompt | model
-        answer_resp = chain.invoke({
-            "q": question,
-            "web": str(web_results)[:1500],
-            "kb": kb_results[:500] if kb_results else "N/A"
-        })
-        
-        answer = answer_resp.content
-        
-        if state["step_count"] % 3 == 0:
-            state["messages"].append(AIMessage(content="🧬 Self-evolution: Improving answer..."))
-            answer = self_evolution.evolve_answer(question, answer, num_variants=2)
-        
-        state["search_history"].append((question, answer))
-        state["step_count"] += 1
-        
-        return state
+    return {
+        "plan": plan,
+        "messages": [AIMessage(content=f"📝 Stage 1 Complete: Generated plan with {len(plan.get('sections', []))} sections")]
+    }
+
+
+def stage2_draft_node(state: TTDDRGraphState) -> dict:
+    """Stage 2a: Generate initial noisy draft (diffusion start)."""
+    model, _, _, _, _ = _get_components()
     
-    def stage2_denoise(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Denoise draft with new information."""
-        if not state["search_history"]:
-            return state
-        
-        latest = state["search_history"][-2:]
-        latest_text = "\n\n".join([f"Q: {q}\nA: {a}" for q, a in latest])
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "Refine draft with new research."),
-            ("user", "Draft: {draft}\n\nNew: {new}")
-        ])
-        
-        chain = prompt | model
-        response = chain.invoke({
-            "draft": state["draft_report"][:800],
-            "new": latest_text
-        })
-        
-        state["draft_report"] = response.content
-        state["messages"].append(AIMessage(content=f"📝 Denoising: Draft updated (rev {state['step_count']})"))
-        
-        return state
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are generating an initial draft feasibility study report.
+Use your internal knowledge to create a preliminary structure.
+This draft will be refined through iterative research and denoising."""),
+        ("user", """Address: {address}
+Brief: {brief}
+
+Research Plan:
+{plan}
+
+Generate an initial draft report covering the key sections outlined in the plan.""")
+    ])
     
-    def stage3_final_report(state: TTDDRGraphState) -> TTDDRGraphState:
-        """Stage 3: Generate final report."""
-        research = "\n\n".join([f"Q: {q}\nA: {a}" for q, a in state["search_history"]])
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """Generate comprehensive feasibility study:
+    plan_text = "\n".join([
+        f"{i+1}. {s.get('title', 'Section')}"
+        for i, s in enumerate(state["plan"].get("sections", []))
+    ])
+    
+    chain = prompt | model
+    response = chain.invoke({
+        "address": state["address"],
+        "brief": state.get("brief", "General feasibility assessment"),
+        "plan": plan_text
+    })
+    
+    return {
+        "draft_report": response.content,
+        "messages": [AIMessage(content=f"✍️ Diffusion Start: Initial draft generated ({len(response.content)} chars)")]
+    }
+
+
+def search_node(state: TTDDRGraphState) -> dict:
+    """Stage 2b: Iterative search with self-evolution."""
+    model, _, _, self_evolution, retriever = _get_components()
+    
+    step = state["step_count"]
+    
+    # Generate search question
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """Generate the next specific, focused search question for the feasibility study.
+
+Consider:
+1. The research plan sections
+2. Previous questions asked
+3. Gaps in current knowledge
+
+Return a specific question or "DONE" if research is complete."""),
+        ("user", """Address: {address}
+Step: {step}/2
+
+Research Plan:
+{plan}
+
+Previous Questions:
+{history}
+
+Generate the next search question.""")
+    ])
+    
+    history = "\n".join([
+        f"{i+1}. {q}"
+        for i, (q, _) in enumerate(state["search_history"][-3:])
+    ]) if state["search_history"] else "None yet"
+    
+    plan_text = "\n".join([
+        f"• {s.get('title', 'Section')}"
+        for s in state["plan"].get("sections", [])
+    ])
+    
+    chain = prompt | model
+    response = chain.invoke({
+        "address": state["address"],
+        "step": step + 1,
+        "plan": plan_text,
+        "history": history
+    })
+    
+    question = response.content.strip()
+    
+    if "DONE" in question.upper() or step >= 2:
+        return {
+            "messages": [AIMessage(content="✓ Research phase complete")]
+        }
+    
+    # Perform search
+    web_results = web_search_tool.invoke({"query": question})
+    
+    kb_results = ""
+    if retriever:
+        try:
+            kb_docs = retriever.retrieve(question, top_k=2)
+            kb_results = "\n\n".join([
+                f"[{d['metadata']['name']}]\n{d['content'][:300]}"
+                for d in kb_docs
+            ])
+        except:
+            pass
+    
+    # Synthesize answer
+    answer_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Synthesize a comprehensive answer from the search results. Focus on facts relevant to property feasibility."),
+        ("user", "Question: {q}\n\nWeb Results:\n{web}\n\nKnowledge Base:\n{kb}\n\nProvide a concise, factual answer.")
+    ])
+    
+    chain = answer_prompt | model
+    answer_resp = chain.invoke({
+        "q": question,
+        "web": str(web_results)[:1500],
+        "kb": kb_results[:500] if kb_results else "Not available"
+    })
+    
+    answer = answer_resp.content
+    
+    # Apply self-evolution every 3 steps
+    messages_update = [AIMessage(content=f"🔍 Step {step+1}: {question[:80]}...")]
+    
+    if step % 2 == 0 and step > 0:
+        messages_update.append(AIMessage(content="🧬 Self-Evolution: Generating variants and selecting best answer..."))
+        answer = self_evolution.evolve_answer(question, answer, num_variants=2, num_iterations=1)
+    
+    # Update search history
+    new_history = state["search_history"] + [(question, answer)]
+    
+    return {
+        "search_history": new_history,
+        "step_count": step + 1,
+        "messages": messages_update
+    }
+
+
+def denoise_node(state: TTDDRGraphState) -> dict:
+    """Stage 2c: Denoise draft with new research (diffusion denoising step)."""
+    model, _, _, _, _ = _get_components()
+    
+    if not state["search_history"]:
+        return {"messages": [AIMessage(content="⚠️ No research to denoise with")]}
+    
+    # Get latest research findings
+    latest = state["search_history"][-2:] if len(state["search_history"]) >= 2 else state["search_history"]
+    latest_text = "\n\n".join([
+        f"Q: {q}\nA: {a}"
+        for q, a in latest
+    ])
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are refining a draft feasibility study report through diffusion-style denoising.
+
+Your task:
+1. Incorporate the new research findings into the draft
+2. Update sections with new facts and data
+3. Verify and correct any inconsistencies
+4. Maintain the overall structure
+5. Improve clarity and coherence
+
+This is an iterative refinement process - each step should make the draft more accurate and comprehensive."""),
+        ("user", """Current Draft:
+{draft}
+
+New Research Findings:
+{research}
+
+Refine the draft by incorporating these findings.""")
+    ])
+    
+    chain = prompt | model
+    response = chain.invoke({
+        "draft": state["draft_report"][:1500],
+        "research": latest_text
+    })
+    
+    revision_num = state["step_count"]
+    
+    return {
+        "draft_report": response.content,
+        "messages": [AIMessage(content=f"📝 Denoising: Draft refined with latest research (revision {revision_num})")]
+    }
+
+
+def final_report_node(state: TTDDRGraphState) -> dict:
+    """Stage 3: Generate final comprehensive report."""
+    model, _, _, _, _ = _get_components()
+    
+    research_text = "\n\n".join([
+        f"Q: {q}\nA: {a}"
+        for q, a in state["search_history"]
+    ])
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """Generate a comprehensive, investor-grade feasibility study report.
+
+Structure:
 1. Executive Summary
-2. Site Context
-3. Zoning Analysis
-4. Environmental Constraints
-5. Infrastructure
-6. Market Analysis
-7. Opportunities
-8. Risks
-9. Recommendations"""),
-            ("user", "Address: {addr}\nResearch: {research}\nDraft: {draft}")
-        ])
-        
-        chain = prompt | model
-        response = chain.invoke({
-            "addr": state["address"],
-            "research": research[:2000],
-            "draft": state["draft_report"][:1000]
-        })
-        
-        state["final_report"] = response.content
-        state["messages"].append(AIMessage(content=f"✅ Stage 3: Final report ({len(response.content)} chars)"))
-        
-        return state
+2. Site Context & Location Analysis
+3. Zoning & Regulatory Framework
+4. Environmental Constraints & Considerations
+5. Infrastructure & Utilities Assessment
+6. Market Analysis & Demographics
+7. Development Opportunities
+8. Risks & Challenges
+9. Recommendations & Next Steps
+
+Use professional language, cite sources where applicable, and be factual and thorough."""),
+        ("user", """Address: {address}
+Brief: {brief}
+
+Research Findings:
+{research}
+
+Current Draft (from denoising):
+{draft}
+
+Generate the final comprehensive feasibility study report in markdown format.""")
+    ])
     
-    def should_continue_search(state: TTDDRGraphState) -> str:
-        """Decide if more search needed."""
-        if state["step_count"] >= 8:
-            return "denoise_final"
-        if state["search_history"] and state["step_count"] % 2 == 0:
-            return "denoise"
-        return "search"
+    chain = prompt | model
+    response = chain.invoke({
+        "address": state["address"],
+        "brief": state.get("brief", "General feasibility assessment"),
+        "research": research_text[:3000],
+        "draft": state["draft_report"][:1500]
+    })
     
-    def route_after_denoise(state: TTDDRGraphState) -> str:
-        """Route after denoising."""
-        if state["step_count"] >= 8:
-            return "final_report"
-        return "search"
+    return {
+        "final_report": response.content,
+        "messages": [AIMessage(content=f"✅ Stage 3 Complete: Final report generated ({len(response.content)} chars)\n\n{response.content[:500]}...")]
+    }
+
+
+# ============================================================================
+# Routing Logic
+# ============================================================================
+
+def should_continue_search(state: TTDDRGraphState) -> Literal["denoise", "final_report"]:
+    """Decide whether to continue search loop or move to final report."""
+    if state["step_count"] >= 2:
+        return "final_report"
     
+    # Check if last search indicated DONE
+    if state["messages"] and "complete" in state["messages"][-1].content.lower():
+        return "final_report"
+    
+    return "denoise"
+
+
+def after_denoise_routing(state: TTDDRGraphState) -> Literal["search", "final_report"]:
+    """After denoising, decide whether to search more or finalize."""
+    if state["step_count"] >= 2:
+        return "final_report"
+    
+    return "search"
+
+
+# ============================================================================
+# Build Graph
+# ============================================================================
+
+def create_graph():
+    """Create TTD-DR agent graph following LangGraph best practices.
+    
+    Graph structure:
+        START → parse_input → stage1_plan → stage2_draft → search → denoise
+                                                              ↑         ↓
+                                                              └─────────┘
+                                                                   (loop)
+                                                                    ↓
+                                                              final_report → END
+    """
+    
+    # Build workflow
     workflow = StateGraph(TTDDRGraphState)
     
-    workflow.add_node("parse_input", parse_input)
-    workflow.add_node("stage1_plan", stage1_plan)
-    workflow.add_node("stage2_draft", stage2_initial_draft)
-    workflow.add_node("search", stage2_search_question)
-    workflow.add_node("denoise", stage2_denoise)
-    workflow.add_node("denoise_final", stage2_denoise)
-    workflow.add_node("final_report", stage3_final_report)
+    # Add nodes
+    workflow.add_node("parse_input", parse_input_node)
+    workflow.add_node("stage1_plan", stage1_plan_node)
+    workflow.add_node("stage2_draft", stage2_draft_node)
+    workflow.add_node("search", search_node)
+    workflow.add_node("denoise", denoise_node)
+    workflow.add_node("final_report", final_report_node)
     
-    workflow.set_entry_point("parse_input")
+    # Add edges to connect nodes
+    workflow.add_edge(START, "parse_input")
     workflow.add_edge("parse_input", "stage1_plan")
     workflow.add_edge("stage1_plan", "stage2_draft")
     workflow.add_edge("stage2_draft", "search")
     
+    # Conditional edge after search: denoise or finalize
     workflow.add_conditional_edges(
         "search",
         should_continue_search,
         {
-            "search": "search",
             "denoise": "denoise",
-            "denoise_final": "denoise_final"
+            "final_report": "final_report"
         }
     )
     
+    # Conditional edge after denoise: loop back to search or finalize
     workflow.add_conditional_edges(
         "denoise",
-        route_after_denoise,
+        after_denoise_routing,
         {
             "search": "search",
             "final_report": "final_report"
         }
     )
     
-    workflow.add_edge("denoise_final", "final_report")
     workflow.add_edge("final_report", END)
     
     return workflow.compile()
 
 
+# Export the compiled graph
 graph = create_graph()
 

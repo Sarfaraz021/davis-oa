@@ -123,22 +123,54 @@ src/ttd_dr/
 
 ### TTD-DR Pipeline
 
+The agent follows a structured graph-based workflow:
+
 ```
-User Query
-    ↓
-[Stage 1] Generate Research Plan
-    ↓
-[Stage 2] Iterative Search & Refinement
-    ├─→ Generate Search Question
-    ├─→ Web Search + KB Retrieval
-    ├─→ Synthesize Answer
-    ├─→ [Optional] Self-Evolution
-    └─→ Denoise Draft Report
-    ↓
-[Stage 3] Generate Final Report
-    ↓
-Output: Feasibility Study Report
+                    START
+                      ↓
+              [parse_input]
+                      ↓
+            [Stage 1: Planning]
+          Generate Research Plan
+                      ↓
+        [Stage 2a: Initial Draft]
+      Generate Noisy Draft (Diffusion)
+                      ↓
+         ┌────────────┴────────────┐
+         │  [Stage 2b: Search]     │
+         │  • Generate Question    │
+         │  • Web Search (Tavily)  │
+         │  • KB Retrieval (Chroma)│
+         │  • Synthesize Answer    │
+         │  • Self-Evolution (3x)  │
+         └────────────┬────────────┘
+                      ↓
+         ┌────────────┴────────────┐
+         │ [Stage 2c: Denoise]     │
+         │  • Refine Draft         │
+         │  • Incorporate Research │
+         │  • Improve Coherence    │
+         └────────────┬────────────┘
+                      ↓
+              (Continue? 6 steps max)
+                   /    \
+                YES      NO
+                 ↓        ↓
+              Search   [Stage 3: Final Report]
+                       Generate Comprehensive
+                       Feasibility Study
+                              ↓
+                            END
 ```
+
+**Key Stages:**
+- **Stage 1**: Structured research plan generation
+- **Stage 2a**: Initial "noisy" draft (diffusion start)
+- **Stage 2b**: Iterative search with self-evolution (2 iterations)
+- **Stage 2c**: Denoising (refine draft with new research)
+- **Stage 3**: Final comprehensive report synthesis
+
+**Note**: The LangGraph version runs 2 search-denoise iterations for faster demos. The CLI version (`run.py`) supports up to 20 iterations for comprehensive research.
 
 ---
 

@@ -10,8 +10,8 @@ load_dotenv()
 
 # Initialize Tavily Search instance
 tavily_search = TavilySearch(
-    max_results=5,
-    topic="general",
+    max_results=2,
+    topic="news",
     # include_answer=False,
     # include_raw_content=False,
     # include_images=False,
