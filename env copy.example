@@ -1,0 +1,22 @@
+# Environment Configuration
+# Copy this file to .env and update the values
+
+# Required: OpenAI API Key (for embeddings)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Database Configuration (optional - uses defaults if not set)
+# POSTGRES_HOST=localhost
+# POSTGRES_PORT=6024
+# POSTGRES_DB=langchain
+# POSTGRES_USER=langchain
+# POSTGRES_PASSWORD=langchain
+
+# Required for LangSmith UI and tracing
+LANGSMITH_API_KEY=your_langsmith_api_key_here
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=optimization-rag-system
+
+
+# Optional: Agent Configuration
+# AGENT_MODEL=gpt-4.1
+# AGENT_TEMPERATURE=0.7
