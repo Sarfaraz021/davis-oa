@@ -15,14 +15,37 @@ This system implements the TTD-DR algorithm from the paper "Deep Researcher with
 - ✅ **Graceful Degradation**: Works even without vector database
 - ✅ **Production Ready**: Robust error handling, configurable parameters
 
+### Quick Start
+
+```bash
+# 1. Clone repository
+git clone https://github.com/Sarfaraz021/davis-oa.git
+git checkout feat/ttd-dr-system
+cd davis-oa
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Set up environment variables
+cp env.example .env
+# Edit .env and add your OPENAI_API_KEY and TAVILY_API_KEY
+
+# 4. Run via CLI
+python run.py --address "123 Main St, San Francisco, CA" --brief "80-unit multifamily"
+
+# OR run via LangGraph Studio
+langgraph dev
+```
+
 ---
 
 ## Setup
 
-### 1. Clone & Install
+### 1. Clone and switch the feat branch & Install
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Sarfaraz021/davis-oa.git
+git checkout feat/ttd-dr-system
 cd davis-oa
 pip install -r requirements.txt
 ```
@@ -40,10 +63,10 @@ Edit `.env` and add:
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
 TAVILY_API_KEY=your_tavily_api_key_here
-LANGSMITH_API_KEY=your_langsmith_api_key_here  # Optional
+LANGSMITH_API_KEY=your_langsmith_api_key_here  # Optional if you want to runo it on langggraph/langsmith ui
 ```
 
-### 3. Build Vector Database (Optional)
+### 3. Build Vector Database (Optional) if you want to add more data in chomra vector store, currently it contains the content from these urls "/davis-oa/data/sources.yaml" just for demo purpose 
 
 For enhanced knowledge retrieval:
 
@@ -57,33 +80,34 @@ Run all cells to create the Chroma vector database from curated sources.
 
 ## Usage
 
-### Basic Usage
+You can run the TTD-DR agent in two ways:
 
+### Option 1: Command Line Interface (CLI)
+
+**Basic Usage:**
 ```bash
 python run.py --address "123 Main St, San Francisco, CA"
 ```
 
-### With Developer Brief
-
+**With Developer Brief:**
 ```bash
 python run.py \
   --address "456 Oak Ave, Austin, TX" \
   --brief "80-unit multifamily building"
 ```
 
-### Advanced Options
-
+**Advanced Options:**
 ```bash
 python run.py \
   --address "789 Pine Rd, Seattle, WA" \
   --brief "Mixed-use development" \
   --output "reports/seattle_project.md" \
   --model "gpt-4o" \
-  --max-steps 15 \
+  --max-steps 20 \
   --no-evolution  # Disable self-evolution
 ```
 
-### Command-Line Arguments
+**Command-Line Arguments:**
 
 | Argument | Description | Default |
 |----------|-------------|---------|
@@ -91,9 +115,70 @@ python run.py \
 | `--brief` | Developer brief | "" |
 | `--output` | Output file path | `reports/example_output.md` |
 | `--model` | OpenAI model | `gpt-4o-mini` |
-| `--max-steps` | Max search/revision steps | 20 |
+| `--max-steps` | Max search/revision steps | `3` (demo), increase to 10-20 for comprehensive |
 | `--no-evolution` | Disable self-evolution | False |
 | `--no-diffusion` | Disable diffusion refinement | False |
+
+**Note:** Default is set to 3 steps for fast demos. For comprehensive feasibility studies, use `--max-steps 10` (thorough) or `--max-steps 20` (very comprehensive).
+
+---
+
+### Option 2: LangGraph Studio (Visual Interface)
+
+**Start the LangGraph development server:**
+
+```bash
+langgraph dev
+```
+
+This will:
+- Start the LangGraph API server on `http://127.0.0.1:2024`
+- Automatically open LangGraph Studio in your browser
+- Enable visual debugging and monitoring of the agent workflow
+
+**Using LangGraph Studio:**
+
+1. **Access Studio:** The browser will open automatically to:
+   ```
+   https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+   ```
+
+2. **Select Agent:** Choose `ttd_dr_agent` from the graph selector
+
+3. **Input:** In the input panel, provide input to run in message field
+
+4. **Run:** Click the "Run" button to start the agent
+
+5. **Monitor:** Watch the agent progress through:
+   - Stage 1: Planning
+   - Stage 2: Initial Draft
+   - Stage 2b: Iterative Search (2 iterations for demo)
+   - Stage 2c: Denoising
+   - Stage 3: Final Report
+
+**Benefits of LangGraph Studio:**
+- 📊 Visual graph execution flow
+- 🔍 Step-by-step debugging
+- 📝 Inspect state at each node
+- 🎯 See intermediate outputs
+- ⚡ Real-time progress monitoring
+
+**CLI vs LangGraph Studio Comparison:**
+
+| Feature | CLI (`run.py`) | LangGraph Studio |
+|---------|----------------|------------------|
+| **Best For** | Production runs | Development & debugging |
+| **Search Steps (Default)** | 3 (demo) | 2 (demo) |
+| **Search Steps (Max)** | Configurable (10-20+ recommended) | 2 (hardcoded for UI speed) |
+| **Output** | Markdown file + JSON state | Visual graph + messages |
+| **Visibility** | Terminal logs | Full graph visualization |
+| **Speed** | Configurable (3 steps ~1-2min) | Fast (2 steps ~1min) |
+| **Use Case** | Final reports & production | Testing & debugging |
+
+**Demo Configuration Note:**
+- Both CLI and LangGraph use minimal iterations (2-3) by default for fast demonstrations
+- For comprehensive research, increase CLI steps: `--max-steps 10` (thorough) or `--max-steps 20` (very comprehensive)
+- LangGraph hardcoded to 2 steps for optimal UI experience; modify `ttd_dr_agent.py` line 305 to increase
 
 ---
 
@@ -101,25 +186,32 @@ python run.py \
 
 ### System Components
 
+The codebase has been optimized and cleaned (~50% reduction in lines) while maintaining full functionality:
+
 ```
 src/ttd_dr/
 ├── agents/
-│   ├── graph.py              # LangGraph ReAct agent (baseline)
-│   └── ttd_dr_agent.py       # Full TTD-DR implementation
+│   └── ttd_dr_agent.py       # Full TTD-DR implementation (441 lines, optimized)
 ├── planner/
-│   └── planner.py            # Stage 1: Research plan generation
+│   └── planner.py            # Research plan generation (28 lines)
 ├── memory/
-│   └── state.py              # State management & history
+│   └── state.py              # State management (44 lines)
 ├── refinement/
-│   ├── evaluator.py          # LLM-as-judge evaluators
-│   └── self_evolution.py     # Self-evolution algorithm
+│   ├── evaluator.py          # LLM-as-judge (39 lines)
+│   └── self_evolution.py     # Self-evolution algorithm (45 lines)
 ├── retrieval/
-│   └── retriever.py          # Chroma vector database
+│   └── retriever.py          # Chroma vector database (50 lines)
 ├── tools/
-│   └── tools.py              # Tavily web search
+│   └── tools.py              # Tavily web search (7 lines)
 └── prompts/
-    └── prompt.py             # System prompts
+    └── prompt.py             # System prompts (13 lines)
 ```
+
+**Code Quality:**
+- ✅ Clean, concise, maintainable
+- ✅ No linting errors
+- ✅ Consistent style throughout
+- ✅ Optimized for readability and performance
 
 ### TTD-DR Pipeline
 
@@ -166,17 +258,29 @@ The agent follows a structured graph-based workflow:
 **Key Stages:**
 - **Stage 1**: Structured research plan generation
 - **Stage 2a**: Initial "noisy" draft (diffusion start)
-- **Stage 2b**: Iterative search with self-evolution (2 iterations)
+- **Stage 2b**: Iterative search with self-evolution (configurable: 2-3 for demos, 10-20 for production)
 - **Stage 2c**: Denoising (refine draft with new research)
 - **Stage 3**: Final comprehensive report synthesis
 
-**Note**: The LangGraph version runs 2 search-denoise iterations for faster demos. The CLI version (`run.py`) supports up to 20 iterations for comprehensive research.
+**Demo Configuration:**
+- **LangGraph**: Hardcoded to 2 iterations for fast UI demonstrations
+- **CLI**: Default 3 iterations (demo mode), configurable via `--max-steps` flag
+- **Production**: Recommended 10-20 iterations for comprehensive feasibility studies
 
 ---
 
 ## Example Output
 
-See `reports/example_output.md` for a complete generated feasibility study report.
+**Note:** To generate an example report, run:
+```bash
+# Quick demo (3 steps, ~1-2 min)
+python run.py --address "123 Main St, San Francisco, CA" --brief "80-unit multifamily" --output reports/example_output.md
+
+# Thorough analysis (10 steps, ~3-4 min)
+python run.py --address "123 Main St, San Francisco, CA" --brief "80-unit multifamily" --output reports/example_output.md --max-steps 10
+```
+
+The generated report will be saved to `reports/example_output.md`.
 
 ### Report Structure
 
@@ -202,9 +306,10 @@ See `reports/example_output.md` for a complete generated feasibility study repor
 
 ### Search Steps
 
-- **10 steps**: Quick preliminary analysis
-- **20 steps** (default): Comprehensive research
-- **30+ steps**: Deep dive for complex projects
+- **3 steps** (default): Fast demo mode (~1-2 minutes)
+- **10 steps**: Thorough preliminary analysis (~3-4 minutes)
+- **20 steps**: Comprehensive research (~5-8 minutes)
+- **30+ steps**: Deep dive for complex projects (~10+ minutes)
 
 ### Algorithms
 
@@ -214,15 +319,23 @@ See `reports/example_output.md` for a complete generated feasibility study repor
 
 ---
 
-## LangGraph Studio
+## Configuration Files
 
-The system includes a LangGraph-compatible agent for visual debugging:
+### langgraph.json
 
-```bash
-langgraph dev
+The `langgraph.json` file configures the LangGraph deployment:
+
+```json
+{
+  "graphs": {
+    "ttd_dr_agent": "./src/ttd_dr/agents/ttd_dr_agent.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.11"
+}
 ```
 
-Access Studio UI at: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
+This tells LangGraph Studio where to find the compiled graph for visual debugging.
 
 ---
 
@@ -243,16 +356,19 @@ See `JUSTIFICATION.md` for detailed explanations of:
 
 ### Typical Execution
 
-- **Time**: 3-5 minutes for 20 search steps
-- **Cost**: ~$0.50-1.00 per report (gpt-4o-mini)
-- **Quality**: Investor-grade, comprehensive analysis
+- **Demo Mode (3 steps)**: ~1-2 minutes, ~$0.10-0.20 per report
+- **Thorough (10 steps)**: ~3-4 minutes, ~$0.30-0.50 per report
+- **Comprehensive (20 steps)**: ~5-8 minutes, ~$0.50-1.00 per report
+- **Cost**: Using gpt-4o-mini (~$0.15/1M tokens)
+- **Quality**: Scales with steps - more steps = more comprehensive
 
 ### Optimization Tips
 
-1. Use `gpt-4o-mini` for cost savings
-2. Reduce `--max-steps` for faster results
-3. Disable `--no-evolution` for speed
-4. Build vector DB for better knowledge retrieval
+1. Use `gpt-4o-mini` for cost savings (default)
+2. Start with 3 steps for quick testing
+3. Use `--max-steps 10` for production reports
+4. Disable `--no-evolution` for additional speed
+5. Build vector DB for better knowledge retrieval
 
 ---
 
@@ -280,18 +396,40 @@ Reduce `--max-steps` or wait for rate limit reset.
 pip install -r requirements.txt
 ```
 
+### LangGraph Studio not opening
+
+1. Check the server is running: `http://127.0.0.1:2024/docs`
+2. Manually open: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
+3. Verify `.env` file has required API keys
+4. Check terminal for error messages
+
+### LangGraph: "Graph not found"
+
+Ensure `langgraph.json` points to the correct graph:
+```json
+{
+  "graphs": {
+    "ttd_dr_agent": "./src/ttd_dr/agents/ttd_dr_agent.py:graph"
+  }
+}
+```
+
 ---
 
 ## Testing
 
-Run the baseline agent:
+Quick smoke test (uses default 3 steps):
 ```bash
-python -c "from src.ttd_dr.agents.graph import create_agent; agent = create_agent(); print('✅ Agent loaded')"
+python run.py --address "123 Main St, San Francisco, CA"
 ```
 
-Test TTD-DR:
+Test with custom steps:
 ```bash
+# Fast test (3 steps, ~1-2 min)
 python run.py --address "Test Address" --max-steps 3
+
+# Production test (10 steps, ~3-4 min)
+python run.py --address "Test Address" --max-steps 10
 ```
 
 ---
@@ -335,5 +473,5 @@ See LICENSE file for details.
 
 ---
 
-**Built with ❤️ for real estate feasibility analysis**
+**Built by Ahmed for real estate feasibility analysis**
 

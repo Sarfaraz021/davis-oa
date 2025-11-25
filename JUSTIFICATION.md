@@ -125,21 +125,30 @@ def _denoise_draft(state):
 
 **Implementation:**
 ```python
-max_search_steps = 20  # Hard limit
+# Demo mode (CLI default: 3, LangGraph: 2)
+max_search_steps = 3  # Fast demos
+# Production mode: 10-20 (configurable via --max-steps)
 question = generate_next_question()
 if question == "DONE":  # Semantic signal
     break
 ```
 
 **Justification:**
-- **Max steps (20)**: Prevents runaway costs, aligns with paper benchmarks
+- **Demo mode (3 steps)**: Fast demonstrations (~1-2 min), good for testing
+- **Production mode (10-20 steps)**: Comprehensive research, aligns with paper benchmarks
 - **Semantic completion**: LLM judges when plan adequately covered
 - **Graceful degradation**: Always produces report, even if incomplete
+- **Configurable**: Users can adjust based on needs vs. speed/cost trade-offs
 
 **Alternative considered:**
 - Plan coverage metric: Complex to implement reliably
 - Fixed steps: Wastes compute on simple queries
 - Cost-based: Unpredictable for users
+
+**Configuration Rationale:**
+- Default 3 steps for CLI enables quick testing without overwhelming demos
+- LangGraph hardcoded to 2 steps for optimal UI experience
+- Easy to scale up for production: `--max-steps 10` or `--max-steps 20`
 
 ---
 

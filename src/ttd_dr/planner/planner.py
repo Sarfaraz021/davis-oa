@@ -1,8 +1,7 @@
-"""
-Research Planner - Generates structured plans for feasibility studies.
-"""
+"""Research Planner - Generates structured feasibility study plans."""
 
-from typing import List, Dict, Any
+import json
+from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
@@ -13,52 +12,21 @@ class ResearchPlanner:
     def __init__(self, model: ChatOpenAI):
         self.model = model
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", self._get_system_prompt()),
+            ("system", "Expert real estate analyst. Generate comprehensive research plan covering: Site Context, Zoning, Environmental, Infrastructure, Market, Opportunities, Risks. Output JSON with 'sections' array containing objects with 'title' and 'questions' fields."),
             ("user", "{query}")
         ])
     
-    def _get_system_prompt(self) -> str:
-        return """You are an expert real estate feasibility analyst. Generate a comprehensive research plan.
-
-Your plan should outline key areas to investigate for a property feasibility study:
-1. Site Context (location, parcel details, current use)
-2. Zoning & Regulations (codes, restrictions, permits)
-3. Environmental Constraints (flood zones, soil, contamination)
-4. Infrastructure & Utilities (access, capacity, costs)
-5. Market Analysis (demographics, demand, comparables)
-6. Development Opportunities (highest & best use, density)
-7. Risks & Challenges (constraints, timeline, costs)
-
-Output a JSON structure with sections and specific questions to research:
-{{
-  "sections": [
-    {{
-      "title": "Section Name",
-      "questions": ["Specific question 1", "Specific question 2"]
-    }}
-  ]
-}}"""
-    
     def generate_plan(self, query: str, brief: str = "") -> Dict[str, Any]:
-        """Generate research plan for a feasibility study."""
-        full_query = f"Address: {query}"
-        if brief:
-            full_query += f"\nDeveloper Brief: {brief}"
+        """Generate research plan for feasibility study."""
+        full_query = f"Address: {query}" + (f"\nBrief: {brief}" if brief else "")
+        response = (self.prompt | self.model).invoke({"query": full_query})
         
-        chain = self.prompt | self.model
-        response = chain.invoke({"query": full_query})
-        
-        import json
         try:
-            plan = json.loads(response.content)
+            return json.loads(response.content)
         except json.JSONDecodeError:
             content = response.content
-            start = content.find('{')
-            end = content.rfind('}') + 1
+            start, end = content.find('{'), content.rfind('}') + 1
             if start != -1 and end > start:
-                plan = json.loads(content[start:end])
-            else:
-                plan = {"sections": [{"title": "General Research", "questions": [query]}]}
-        
-        return plan
+                return json.loads(content[start:end])
+            return {"sections": [{"title": "General Research", "questions": [query]}]}
 
